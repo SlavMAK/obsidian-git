@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Resolve version
+        id: version
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+
+          if printf '%s' "${COMMIT_MSG:-}" | grep -qF '[skip release]'; then
+            echo "Коммит помечен [skip release]"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git tag --points-at HEAD | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "На HEAD уже есть тег версии — релиз не нужен"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          latest="$(git tag --list '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
+          # Базовый вариант — patch поверх последнего тега. Если в manifest.json
+          # вручную подняли minor/major, побеждает он.
+          version="$(LATEST="$latest" node -e '
+            const fs = require("fs");
+            const parse = (v) => v.split(".").map(Number);
+            const gt = (a, b) => {
+              const [x, y] = [parse(a), parse(b)];
+              for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
+              return false;
+            };
+            const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf8")).version;
+            const latest = process.env.LATEST;
+            if (!latest) { console.log(manifest); process.exit(0); }
+            const [major, minor, patch] = parse(latest);
+            const bumped = `${major}.${minor}.${patch + 1}`;
+            console.log(gt(manifest, bumped) ? manifest : bumped);
+          ')"
+
+          echo "Предыдущий тег: ${latest:-<нет>} → новая версия: $version"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Write version into manifest.json / package.json / versions.json
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const version = process.env.VERSION;
+
+            const bump = (file) => {
+              const json = JSON.parse(fs.readFileSync(file, "utf8"));
+              json.version = version;
+              fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+            };
+            bump("manifest.json");
+            bump("package.json");
+
+            // versions.json: версия плагина -> минимальная версия Obsidian.
+            const { minAppVersion } = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
+            const versions = fs.existsSync("versions.json")
+              ? JSON.parse(fs.readFileSync("versions.json", "utf8"))
+              : {};
+            versions[version] = minAppVersion;
+            fs.writeFileSync("versions.json", JSON.stringify(versions, null, 2) + "\n");
+          '
+
+      - name: Install
+        if: steps.version.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Typecheck
+        if: steps.version.outputs.skip != 'true'
+        run: npm run typecheck
+
+      - name: Test
+        if: steps.version.outputs.skip != 'true'
+        run: npm test
+
+      - name: Build
+        if: steps.version.outputs.skip != 'true'
+        run: npm run build
+
+      - name: Package
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Имя каталога в архиве должно совпадать с id плагина из manifest.json,
+          # чтобы архив распаковывался прямо в .obsidian/plugins/.
+          id="$(node -p "require('./manifest.json').id")"
+          rm -rf dist
+          mkdir -p "dist/$id"
+          cp main.js manifest.json styles.css versions.json "dist/$id/"
+          (cd dist && zip -qr "../$id-$VERSION.zip" "$id")
+          echo "PLUGIN_ID=$id" >> "$GITHUB_ENV"
+
+      - name: Create release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Тег без префикса v — требование каталога плагинов Obsidian:
+          # он должен совпадать с manifest.version символ в символ.
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --generate-notes \
+            main.js \
+            manifest.json \
+            styles.css \
+            versions.json \
+            "$PLUGIN_ID-$VERSION.zip"

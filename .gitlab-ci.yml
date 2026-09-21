@@ -1,0 +1,56 @@
+# GitLab остаётся источником правды. Пайплайн проверяет сборку и,
+# если ветка по умолчанию зелёная, зеркалит её в GitHub, где отдельный
+# workflow выпускает релиз.
+
+stages:
+  - verify
+  - mirror
+
+default:
+  interruptible: true
+
+.node:
+  image: node:20-bookworm
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+verify:
+  extends: .node
+  stage: verify
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  script:
+    - npm run typecheck
+    # `npm test` сам собирает main.js, а тесты гоняют настоящий git
+    # во временном репозитории — бинарь есть в образе node:20-bookworm.
+    - npm test
+
+mirror:github:
+  stage: mirror
+  image:
+    name: alpine/git:2.45.2
+    # У образа ENTRYPOINT ["git"], иначе раннер зовёт `git sh -c ...`.
+    entrypoint: [""]
+  needs: [verify]
+  rules:
+    # Зеркалим только ветку по умолчанию и только из этого проекта
+    # (в форках переменной GITHUB_TOKEN нет).
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $GITHUB_TOKEN
+  variables:
+    # Полная история: GitHub-релиз считает версию по тегам и changelog по коммитам.
+    GIT_DEPTH: "0"
+    GIT_STRATEGY: clone
+  script:
+    - test -n "$GITHUB_REPO" || { echo "GITHUB_REPO не задан (owner/repo)"; exit 1; }
+    - git remote remove github 2>/dev/null || true
+    - git remote add github "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+    # --force, потому что GitLab — единственный, кто пишет в эту ветку.
+    # Теги не трогаем: их создаёт GitHub при релизе.
+    - git push --force github "HEAD:refs/heads/${CI_DEFAULT_BRANCH}"
