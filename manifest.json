@@ -1,0 +1,9 @@
+{
+  "id": "git",
+  "name": "Git",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.4",
+  "description": "Source control for the vault: stage & commit, push/pull/fetch, branch switching, commit graph, merge conflict resolution.",
+  "author": "muxaujl",
+  "isDesktopOnly": true
+}
