@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +12,10 @@ import * as esbuild from 'esbuild';
 const here = dirname(fileURLToPath(import.meta.url));
 const outfile = join(here, '.core.cjs');
 await esbuild.build({
-  stdin: { contents: `export * from './src/git'; export * as conflicts from './src/conflicts'; export * as lanes from './src/lanes';`, resolveDir: join(here, '..'), loader: 'ts' },
+  stdin: { contents: `export * from './src/git'; export * as conflicts from './src/conflicts'; export * as lanes from './src/lanes'; export * as i18n from './src/i18n';`, resolveDir: join(here, '..'), loader: 'ts' },
   bundle: true, platform: 'node', format: 'cjs', outfile, logLevel: 'silent'
 });
-const { Git, conflicts, lanes } = await import(outfile);
+const { Git, conflicts, lanes, i18n, parseRemoteUrl, httpsUrl, sshUrl, AUTH_ERROR } = await import(outfile);
 
 test('main.js loads in a renderer-like context', async () => {
   assert.ok(existsSync(join(here, '..', 'main.js')), 'run npm run build first');
@@ -100,6 +100,43 @@ test('git wrapper against a temp repo', async () => {
   assert.ok(log.some(c => c.refs.includes('feature')));
   await git.mergeAbort();
   assert.equal((await git.status()).merging, false);
+});
+
+test('config: unset key is empty, -c override and --global are visible', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'git-cfg-'));
+  const home = process.env.HOME; process.env.HOME = dir; // isolate ~/.gitconfig
+  try {
+    execFileSync('git', ['init'], { cwd: dir });
+    assert.equal(await new Git({ cwd: dir }).config('user.name'), '');
+    assert.equal(await new Git({ cwd: dir, config: { 'user.name': 'T' } }).config('user.name'), 'T');
+    const git = new Git({ cwd: dir });
+    await git.run(['config', '--global', 'user.email', 'g@g']);
+    assert.equal(await git.config('user.email'), 'g@g');
+  } finally { process.env.HOME = home; }
+});
+
+test('i18n: english fallback fills placeholders, ru entries keep the same placeholders', () => {
+  assert.equal(i18n.t('Merge {name}', { name: 'dev' }), 'Merge dev'); // no window here -> English
+  assert.equal(i18n.t('unknown {x}', { x: 1 }), 'unknown 1');
+  const ph = s => [...s.matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort().join();
+  for (const [k, v] of Object.entries(i18n.ru)) assert.equal(ph(v), ph(k), `placeholders differ for ${JSON.stringify(k)}`);
+  // every key used in the sources exists in the dictionary
+  const src = readdirSync(join(here, '..', 'src')).filter(f => f.endsWith('.ts') && f !== 'i18n.ts').map(f => readFileSync(join(here, '..', 'src', f), 'utf8')).join('\n');
+  for (const m of src.matchAll(/\bt\((['"])((?:\\.|(?!\1).)*)\1/g)) {
+    const key = m[2].replace(/\\n/g, '\n').replace(/\\'/g, "'");
+    assert.ok(key in i18n.ru, `missing ru translation for ${JSON.stringify(key)}`);
+  }
+});
+
+test('remote url: parse https/ssh/scp forms, rebuild with credentials', () => {
+  for (const u of ['https://github.com/me/repo.git', 'https://old:tok@github.com/me/repo.git', 'ssh://git@github.com/me/repo.git', 'git@github.com:me/repo.git'])
+    assert.deepEqual(parseRemoteUrl(u), { host: 'github.com', path: 'me/repo.git' }, u);
+  assert.equal(parseRemoteUrl('/local/path'), null);
+  assert.equal(httpsUrl('gitlab.com', 'g/r.git', 'oauth2', 'a b@c'), 'https://oauth2:a%20b%40c@gitlab.com/g/r.git');
+  assert.equal(sshUrl('gitlab.com', 'g/r.git'), 'git@gitlab.com:g/r.git');
+  assert.ok(AUTH_ERROR.test("fatal: Authentication failed for 'https://github.com/me/repo.git/'"));
+  assert.ok(AUTH_ERROR.test('git@github.com: Permission denied (publickey).'));
+  assert.ok(!AUTH_ERROR.test('error: failed to push some refs'));
 });
 
 test('remotes: add / set-url / remove', async () => {

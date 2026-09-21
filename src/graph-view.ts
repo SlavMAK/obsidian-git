@@ -1,9 +1,10 @@
-import { ItemView, WorkspaceLeaf, setIcon } from 'obsidian';
+import { ItemView, Notice, WorkspaceLeaf, setIcon } from 'obsidian';
 import type GitPlugin from './main';
 import { REFRESH_EVENT } from './main';
 import type { Commit } from './git';
 import { layout, type Row } from './lanes';
-import { relativeDate } from './ui';
+import { confirm, relativeDate } from './ui';
+import { t } from './i18n';
 
 export const GRAPH_VIEW = 'git-graph';
 const COLORS = ['#0085d9', '#d9008f', '#00d90a', '#d98500', '#a300d9', '#ff0000', '#00d9cc', '#e138e8', '#85d900', '#dc5b23', '#6f24d6', '#ffcc00'];
@@ -18,7 +19,7 @@ export class GraphView extends ItemView {
 
   constructor(leaf: WorkspaceLeaf, private plugin: GitPlugin) { super(leaf); }
   getViewType(): string { return GRAPH_VIEW; }
-  getDisplayText(): string { return 'Commit graph'; }
+  getDisplayText(): string { return t('Commit graph'); }
   getIcon(): string { return 'git-graph'; }
 
   async onOpen(): Promise<void> {
@@ -27,7 +28,7 @@ export class GraphView extends ItemView {
   }
 
   private async reload(): Promise<void> {
-    if (!this.plugin.isRepo) { this.contentEl.empty(); this.contentEl.createDiv({ cls: 'git-empty', text: 'Not a git repository' }); return; }
+    if (!this.plugin.isRepo) { this.contentEl.empty(); this.contentEl.createDiv({ cls: 'git-empty', text: t('Not a git repository') }); return; }
     try { this.commits = await this.plugin.git.log(this.limit); }
     catch (e) { this.contentEl.empty(); this.contentEl.createDiv({ cls: 'git-empty', text: (e as Error).message }); return; }
     this.render();
@@ -40,7 +41,7 @@ export class GraphView extends ItemView {
     const rows = layout(this.commits);
     const width = Math.max(1, ...rows.map(r => r.width)) * W;
     const table = el.createDiv({ cls: 'git-graph-table' });
-    if (!this.commits.length) table.createDiv({ cls: 'git-empty', text: 'No commits yet' });
+    if (!this.commits.length) table.createDiv({ cls: 'git-empty', text: t('No commits yet') });
     this.commits.forEach((c, i) => {
       const row = table.createDiv({ cls: 'git-graph-row' });
       row.appendChild(this.svg(rows[i], width));
@@ -57,7 +58,7 @@ export class GraphView extends ItemView {
       if (this.expanded === c.hash) void this.details(table.createDiv({ cls: 'git-graph-details' }), c);
     });
     if (this.commits.length >= this.limit) {
-      const more = el.createEl('button', { text: 'Load more' });
+      const more = el.createEl('button', { text: t('Load more') });
       more.onclick = () => { this.limit *= 2; void this.reload(); };
     }
   }
@@ -66,8 +67,12 @@ export class GraphView extends ItemView {
     const head = el.createDiv({ cls: 'git-graph-details-head' });
     head.createEl('code', { text: c.hash });
     head.createSpan({ text: ` ${c.author} <${c.email}> · ${c.date.toLocaleString()}` });
-    if (c.parents.length > 1) head.createSpan({ text: ` · merge of ${c.parents.map(p => p.slice(0, 7)).join(', ')}` });
+    if (c.parents.length > 1) head.createSpan({ text: t(' · merge of {parents}', { parents: c.parents.map(p => p.slice(0, 7)).join(', ') }) });
     el.createDiv({ cls: 'git-graph-message', text: [c.subject, c.body].filter(Boolean).join('\n\n') });
+    if (!c.refs.includes('HEAD')) {
+      const btn = el.createEl('button', { text: t('Checkout'), cls: 'git-graph-checkout' });
+      btn.onclick = ev => { ev.stopPropagation(); void this.checkout(c); };
+    }
     const files = await this.plugin.git.show(c.hash).catch(() => []);
     const list = el.createDiv({ cls: 'git-list' });
     for (const f of files) {
@@ -76,6 +81,16 @@ export class GraphView extends ItemView {
       row.createSpan({ text: f.status, cls: `git-badge-letter git-state-${f.status}` });
       row.onclick = ev => { ev.stopPropagation(); void this.plugin.openFile(f.path); };
     }
+  }
+
+  /** Prefer a local branch pointing at the commit; otherwise detach HEAD after explaining what that means. */
+  private async checkout(c: Commit): Promise<void> {
+    const { plugin } = this;
+    if (plugin.status?.entries.some(e => e.staged || (e.state !== '?' && !e.conflict))) { new Notice(t('Commit or discard local changes before switching')); return; }
+    const branch = c.refs.find(r => r !== 'HEAD' && !r.startsWith('tag: ') && !r.includes('/'));
+    if (!branch && !(await confirm(this.app, t('Checkout commit'),
+      t("You will be looking at an old version of the vault, not on any branch. New commits made here would be lost. To return, switch back to a branch. Continue?"), t('Checkout')))) return;
+    await plugin.run(t('Checkout'), () => plugin.git.checkoutRef(branch ?? c.hash));
   }
 
   private svg(r: Row, width: number): SVGElement {

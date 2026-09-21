@@ -42,6 +42,21 @@ export interface Status {
 
 export interface Remote { name: string; fetchUrl: string; pushUrl: string }
 
+/** Split `https://[user@]host/path`, `ssh://git@host/path` or `git@host:path` into host + path. Credentials are dropped. */
+// ponytail: custom ssh ports are dropped; add a `port` field when someone hosts GitLab on :2222.
+export function parseRemoteUrl(url: string): { host: string; path: string } | null {
+  const m = /^(?:https?|ssh|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/.exec(url) ?? /^(?:[^@:/]+@)?([^:/]+):(?!\/\/)(.+)$/.exec(url);
+  return m ? { host: m[1], path: m[2].replace(/^\/+/, '') } : null;
+}
+/** HTTPS URL with embedded credentials; git reads them from .git/config so no credential helper is needed. */
+export function httpsUrl(host: string, path: string, user: string, secret: string): string {
+  return `https://${encodeURIComponent(user)}:${encodeURIComponent(secret)}@${host}/${path}`;
+}
+export function sshUrl(host: string, path: string): string { return `git@${host}:${path}`; }
+
+/** Messages git/ssh print when the remote rejects our credentials (or asks for ones we cannot type). */
+export const AUTH_ERROR = /Authentication failed|could not read (Username|Password)|Permission denied \(publickey|Host key verification failed|Invalid username or (password|token)|HTTP Basic: Access denied|returned error: 40[13]|Repository not found/i;
+
 export interface Branch {
   name: string;
   remote: boolean;
@@ -69,11 +84,18 @@ export class Git {
 
   async run(args: string[], input?: string): Promise<string> {
     const cfg = Object.entries(this.opts.config ?? {}).flatMap(([k, v]) => v ? ['-c', `${k}=${v}`] : []);
+    // Never let git/ssh pop their own password dialogs: the failure must reach us so the plugin can ask in its own UI.
+    const { GIT_ASKPASS, SSH_ASKPASS, SSH_ASKPASS_REQUIRE, ...env } = process.env;
+    void GIT_ASKPASS; void SSH_ASKPASS; void SSH_ASKPASS_REQUIRE;
     try {
       const child = execFileAsync(this.opts.gitPath || 'git', [...cfg, ...args], {
         cwd: this.opts.cwd,
         maxBuffer: 64 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+        env: {
+          ...env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C',
+          // No TTY in Electron: ssh cannot ask anything, so fail fast (BatchMode) but still record new host keys.
+          GIT_SSH_COMMAND: env.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new'
+        },
         windowsHide: true
       });
       if (input !== undefined) { child.child.stdin?.end(input); }
@@ -91,6 +113,11 @@ export class Git {
 
   async init(): Promise<void> {
     await this.run(['init']);
+  }
+
+  /** Effective config value, '' when unset. Honours `-c` overrides from plugin settings. */
+  async config(key: string): Promise<string> {
+    return (await this.run(['config', '--get', key]).catch(() => '')).trim();
   }
 
   async version(): Promise<string> { return (await this.run(['--version'])).trim(); }
@@ -210,8 +237,11 @@ export class Git {
   }
 
   /** Switch to a local branch, or create a tracking branch from a remote one. */
+  /** Switch to a branch name or a commit hash (the latter leaves HEAD detached). */
+  checkoutRef(ref: string): Promise<string> { return this.run(['checkout', ref]); }
+
   checkout(branch: Branch): Promise<string> {
-    if (!branch.remote) return this.run(['checkout', branch.name]);
+    if (!branch.remote) return this.checkoutRef(branch.name);
     const local = branch.name.replace(/^[^/]+\//, '');
     return this.run(['checkout', '-b', local, '--track', branch.name]);
   }

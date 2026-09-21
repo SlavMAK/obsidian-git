@@ -5,6 +5,7 @@ import type { StatusEntry } from './git';
 import { confirm } from './ui';
 import { GRAPH_VIEW } from './graph-view';
 import { CONFLICT_VIEW } from './conflict-view';
+import { t } from './i18n';
 
 export const SCM_VIEW = 'git-scm';
 export const DIFF_VIEW = 'git-diff';
@@ -19,7 +20,7 @@ export class ScmView extends ItemView {
 
   constructor(leaf: WorkspaceLeaf, private plugin: GitPlugin) { super(leaf); }
   getViewType(): string { return SCM_VIEW; }
-  getDisplayText(): string { return 'Source control'; }
+  getDisplayText(): string { return t('Source control'); }
   getIcon(): string { return 'git-pull-request'; }
 
   async onOpen(): Promise<void> {
@@ -37,21 +38,21 @@ export class ScmView extends ItemView {
     root.addClass('git-scm');
     if (!plugin.isRepo) {
       const empty = root.createDiv({ cls: 'git-empty' });
-      empty.createEl('p', { text: plugin.lastError ?? 'This vault is not a git repository.' });
-      empty.createEl('button', { text: 'Initialize repository', cls: 'mod-cta' }).onclick = () => void plugin.initRepo();
+      empty.createEl('p', { text: plugin.lastError ?? t('This vault is not a git repository.') });
+      empty.createEl('button', { text: t('Initialize repository'), cls: 'mod-cta' }).onclick = () => void plugin.initRepo();
       return;
     }
     const st = plugin.status;
     if (!st) {
-      root.createDiv({ cls: 'git-empty' }).createEl('p', { text: plugin.lastError ?? 'Loading…' });
+      root.createDiv({ cls: 'git-empty' }).createEl('p', { text: plugin.lastError ?? t('Loading…') });
       return;
     }
 
     // Header: branch + ahead/behind + toolbar
     const header = root.createDiv({ cls: 'git-header' });
-    const branch = header.createDiv({ cls: 'git-branch mod-clickable', attr: { 'aria-label': 'Switch branch' } });
+    const branch = header.createDiv({ cls: 'git-branch mod-clickable', attr: { 'aria-label': t('Switch branch') } });
     setIcon(branch.createSpan(), 'git-branch');
-    branch.createSpan({ text: st.branch ?? `detached @ ${st.head}` });
+    branch.createSpan({ text: st.branch ?? t('detached @ {head}', { head: st.head }) });
     if (st.ahead || st.behind) branch.createSpan({ cls: 'git-ab', text: `${st.ahead ? `↑${st.ahead}` : ''} ${st.behind ? `↓${st.behind}` : ''}`.trim() });
     branch.onclick = () => void plugin.switchBranch();
     const tools = header.createDiv({ cls: 'git-tools' });
@@ -60,68 +61,68 @@ export class ScmView extends ItemView {
       setIcon(b, icon);
       b.onclick = () => void cb();
     };
-    tool('refresh-cw', 'Refresh', () => plugin.refresh(true));
-    tool('cloud-download', 'Fetch', () => plugin.run('Fetch', () => plugin.git.fetch()));
-    tool('download', 'Pull', () => plugin.run('Pull', () => plugin.git.pull()));
-    tool('upload', st.upstream ? 'Push' : 'Publish branch', () => plugin.push());
-    tool('git-graph', 'Commit graph', () => plugin.openView(GRAPH_VIEW, 'tab'));
-    tool('git-merge', 'Merge branch into current', () => plugin.mergeBranch());
-    tool('server', 'Manage remotes', () => plugin.manageRemotes());
+    tool('refresh-cw', t('Refresh'), () => plugin.refresh(true));
+    tool('cloud-download', t('Fetch'), () => plugin.run(t('Fetch'), () => plugin.git.fetch()));
+    tool('download', t('Pull'), () => plugin.run(t('Pull'), () => plugin.git.pull()));
+    tool('upload', t(st.upstream ? 'Push' : 'Publish branch'), () => plugin.push());
+    tool('git-graph', t('Commit graph'), () => plugin.openView(GRAPH_VIEW, 'tab'));
+    tool('git-merge', t('Merge branch into current'), () => plugin.mergeBranch());
+    tool('server', t('Manage remotes'), () => plugin.manageRemotes());
 
     // Commit box
     const staged = st.entries.filter(e => e.staged);
     const changes = st.entries.filter(e => !e.staged && !e.conflict);
     const conflicts = st.entries.filter(e => e.conflict);
     const box = root.createDiv({ cls: 'git-commit-box' });
-    const ta = box.createEl('textarea', { cls: 'git-message', attr: { rows: '3', placeholder: `Message (Ctrl+Enter to commit on '${st.branch ?? 'HEAD'}')` } });
+    const ta = box.createEl('textarea', { cls: 'git-message', attr: { rows: '3', placeholder: t("Message (Ctrl+Enter to commit on '{branch}')", { branch: st.branch ?? 'HEAD' }) } });
     ta.value = this.message;
     if (caret >= 0) { ta.focus(); ta.setSelectionRange(caret, caret); }
     ta.oninput = () => { this.message = ta.value; };
     ta.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void this.commit(); } };
     const row = box.createDiv({ cls: 'git-commit-row' });
-    const commitBtn = row.createEl('button', { text: 'Commit', cls: 'mod-cta git-commit-btn' });
+    const commitBtn = row.createEl('button', { text: t('Commit'), cls: 'mod-cta git-commit-btn' });
     commitBtn.onclick = () => void this.commit();
-    if (st.merging) commitBtn.setText('Commit merge');
-    const more = row.createEl('button', { cls: 'git-commit-more', attr: { 'aria-label': 'More commit actions' } });
+    if (st.merging) commitBtn.setText(t('Commit merge'));
+    const more = row.createEl('button', { cls: 'git-commit-more', attr: { 'aria-label': t('More commit actions') } });
     setIcon(more, 'chevron-down');
     more.onclick = ev => {
       const menu = new Menu();
-      menu.addItem(i => i.setTitle('Commit (amend)').setIcon('pencil').onClick(() => void this.commit({ amend: true })));
-      menu.addItem(i => i.setTitle('Commit & push').setIcon('upload').onClick(() => void this.commit({ push: true })));
-      menu.addItem(i => i.setTitle('Stage all & commit').setIcon('plus-circle').onClick(() => void this.commit({ all: true })));
-      menu.addItem(i => i.setTitle('Stage all, commit & push').setIcon('arrow-up-circle').onClick(() => void this.commit({ all: true, push: true })));
+      menu.addItem(i => i.setTitle(t('Commit (amend)')).setIcon('pencil').onClick(() => void this.commit({ amend: true })));
+      menu.addItem(i => i.setTitle(t('Commit & push')).setIcon('upload').onClick(() => void this.commit({ push: true })));
+      menu.addItem(i => i.setTitle(t('Stage all & commit')).setIcon('plus-circle').onClick(() => void this.commit({ all: true })));
+      menu.addItem(i => i.setTitle(t('Stage all, commit & push')).setIcon('arrow-up-circle').onClick(() => void this.commit({ all: true, push: true })));
       menu.addSeparator();
-      menu.addItem(i => i.setTitle('Undo last commit').setIcon('undo-2').setDisabled(st.head === '(initial)').onClick(() => void this.undoLastCommit()));
+      menu.addItem(i => i.setTitle(t('Undo last commit')).setIcon('undo-2').setDisabled(st.head === '(initial)').onClick(() => void this.undoLastCommit()));
       menu.showAtMouseEvent(ev);
     };
     if (st.merging) {
       const banner = root.createDiv({ cls: 'git-banner' });
-      banner.createSpan({ text: conflicts.length ? `Merge in progress: resolve ${conflicts.length} conflict(s), then commit.` : 'Merge in progress: all conflicts resolved, commit to finish.' });
-      const abort = banner.createEl('button', { text: 'Abort merge', cls: 'mod-warning' });
+      banner.createSpan({ text: conflicts.length ? t('Merge in progress: resolve {n} conflict(s), then commit.', { n: conflicts.length }) : t('Merge in progress: all conflicts resolved, commit to finish.') });
+      const abort = banner.createEl('button', { text: t('Abort merge'), cls: 'mod-warning' });
       abort.onclick = async () => {
-        if (await confirm(this.app, 'Abort merge', 'Discard the merge and restore the pre-merge state?', 'Abort merge', true)) await plugin.run('Abort merge', () => plugin.git.mergeAbort());
+        if (await confirm(this.app, t('Abort merge'), t('Discard the merge and restore the pre-merge state?'), t('Abort merge'), true)) await plugin.run(t('Abort merge'), () => plugin.git.mergeAbort());
       };
     }
 
     // Groups
-    if (conflicts.length) this.group(root, 'Merge changes', conflicts, [
-      { icon: 'check', label: 'Mark as resolved (stage)', cb: e => this.stage([e]) }
+    if (conflicts.length) this.group(root, t('Merge changes'), conflicts, [
+      { icon: 'check', label: t('Mark as resolved (stage)'), cb: e => this.stage([e]) }
     ], e => plugin.openView(CONFLICT_VIEW, 'tab', { path: e.path }), [
-      { icon: 'check-check', label: 'Stage all resolved', cb: () => this.stage(conflicts) }
+      { icon: 'check-check', label: t('Stage all resolved'), cb: () => this.stage(conflicts) }
     ]);
-    this.group(root, 'Staged changes', staged, [
-      { icon: 'minus', label: 'Unstage', cb: e => plugin.run('Unstage', () => plugin.git.unstage([e.path]), true) }
+    this.group(root, t('Staged changes'), staged, [
+      { icon: 'minus', label: t('Unstage'), cb: e => plugin.run(t('Unstage'), () => plugin.git.unstage([e.path]), true) }
     ], e => this.openDiff(e), [
-      { icon: 'minus', label: 'Unstage all', cb: () => plugin.run('Unstage all', () => plugin.git.unstageAll(), true) }
+      { icon: 'minus', label: t('Unstage all'), cb: () => plugin.run(t('Unstage all'), () => plugin.git.unstageAll(), true) }
     ]);
-    this.group(root, 'Changes', changes, [
-      { icon: 'undo-2', label: 'Discard changes', cb: e => this.discard([e]) },
-      { icon: 'plus', label: 'Stage', cb: e => this.stage([e]) }
+    this.group(root, t('Changes'), changes, [
+      { icon: 'undo-2', label: t('Discard changes'), cb: e => this.discard([e]) },
+      { icon: 'plus', label: t('Stage'), cb: e => this.stage([e]) }
     ], e => this.openDiff(e), [
-      { icon: 'undo-2', label: 'Discard all changes', cb: () => this.discard(changes) },
-      { icon: 'plus', label: 'Stage all', cb: () => this.stage(changes) }
+      { icon: 'undo-2', label: t('Discard all changes'), cb: () => this.discard(changes) },
+      { icon: 'plus', label: t('Stage all'), cb: () => this.stage(changes) }
     ]);
-    if (!st.entries.length) root.createDiv({ cls: 'git-empty', text: 'No changes' });
+    if (!st.entries.length) root.createDiv({ cls: 'git-empty', text: t('No changes') });
   }
 
   private group(root: HTMLElement, title: string, entries: StatusEntry[], actions: { icon: string; label: string; cb: (e: StatusEntry) => unknown }[],
@@ -149,7 +150,7 @@ export class ScmView extends ItemView {
       row.createSpan({ text: name, cls: `git-file-name git-state-${badge(e).replace('!', 'conflict').replace('?', 'U')}` });
       if (dir) row.createSpan({ text: dir, cls: 'git-file-dir' });
       const acts = row.createSpan({ cls: 'git-row-actions' });
-      const open = acts.createSpan({ cls: 'clickable-icon', attr: { 'aria-label': 'Open file' } });
+      const open = acts.createSpan({ cls: 'clickable-icon', attr: { 'aria-label': t('Open file') } });
       setIcon(open, 'file');
       open.onclick = ev => { ev.stopPropagation(); void this.plugin.openFile(e.path); };
       for (const a of actions) {
@@ -163,35 +164,35 @@ export class ScmView extends ItemView {
   }
 
   private stage(entries: StatusEntry[]): Promise<boolean> {
-    return this.plugin.run('Stage', () => this.plugin.git.add(entries.map(e => e.path)), true);
+    return this.plugin.run(t('Stage'), () => this.plugin.git.add(entries.map(e => e.path)), true);
   }
 
   private async discard(entries: StatusEntry[]): Promise<void> {
     const untracked = entries.filter(e => e.state === '?').length;
-    const what = entries.length === 1 ? `changes in '${entries[0].path}'` : `changes in ${entries.length} files`;
-    const extra = untracked ? ` ${untracked} untracked file(s) will be DELETED.` : '';
-    if (!(await confirm(this.app, 'Discard changes', `Are you sure you want to discard ${what}? This cannot be undone.${extra}`, 'Discard changes', true))) return;
-    await this.plugin.run('Discard', () => this.plugin.git.discard(entries), true);
+    const what = entries.length === 1 ? t("changes in '{path}'", { path: entries[0].path }) : t('changes in {n} files', { n: entries.length });
+    const extra = untracked ? t(' {n} untracked file(s) will be DELETED.', { n: untracked }) : '';
+    if (!(await confirm(this.app, t('Discard changes'), t('Are you sure you want to discard {what}? This cannot be undone.{extra}', { what, extra }), t('Discard changes'), true))) return;
+    await this.plugin.run(t('Discard'), () => this.plugin.git.discard(entries), true);
   }
 
   private async commit(opts: { amend?: boolean; push?: boolean; all?: boolean } = {}): Promise<void> {
     const { plugin } = this;
     const st = plugin.status;
     if (!st) return;
-    if (st.entries.some(e => e.conflict)) { new Notice('Resolve conflicts before committing'); return; }
+    if (st.entries.some(e => e.conflict)) { new Notice(t('Resolve conflicts before committing')); return; }
     const hasStaged = st.entries.some(e => e.staged);
     let all = opts.all;
     if (!hasStaged && !all && !opts.amend) {
-      if (!st.entries.length) { new Notice('No changes to commit'); return; }
+      if (!st.entries.length) { new Notice(t('No changes to commit')); return; }
       // VS Code "smart commit": offer to stage everything.
-      if (!(await confirm(this.app, 'Commit', 'There are no staged changes to commit. Stage all your changes and commit them directly?', 'Stage all & commit'))) return;
+      if (!(await confirm(this.app, t('Commit'), t('There are no staged changes to commit. Stage all your changes and commit them directly?'), t('Stage all & commit')))) return;
       all = true;
     }
     let message = this.message.trim();
-    if (!message && !opts.amend) { new Notice('Enter a commit message'); return; }
+    if (!message && !opts.amend) { new Notice(t('Enter a commit message')); return; }
     if (!message && opts.amend) message = (await plugin.git.run(['log', '-1', '--format=%B'])).trim();
-    if (all) { if (!(await plugin.run('Stage all', () => plugin.git.addAll(), true))) return; }
-    const ok = await plugin.run('Commit', () => plugin.git.commit(message, opts.amend));
+    if (all) { if (!(await plugin.run(t('Stage all'), () => plugin.git.addAll(), true))) return; }
+    const ok = await plugin.run(t('Commit'), () => plugin.git.commit(message, opts.amend));
     if (!ok) return;
     this.message = '';
     if (opts.push) await plugin.push(); else this.render();
@@ -200,12 +201,12 @@ export class ScmView extends ItemView {
   async undoLastCommit(): Promise<void> {
     const { plugin } = this;
     const st = plugin.status;
-    if (!st || st.head === '(initial)') { new Notice('Nothing to undo'); return; }
-    if (st.merging) { new Notice('Finish or abort the merge first'); return; }
-    if (st.upstream && st.ahead === 0 && !(await confirm(this.app, 'Undo last commit',
-      'The last commit is already pushed. Undoing it locally will make this branch diverge from the remote. Continue?', 'Undo anyway', true))) return;
+    if (!st || st.head === '(initial)') { new Notice(t('Nothing to undo')); return; }
+    if (st.merging) { new Notice(t('Finish or abort the merge first')); return; }
+    if (st.upstream && st.ahead === 0 && !(await confirm(this.app, t('Undo last commit'),
+      t('The last commit is already pushed. Undoing it locally will make this branch diverge from the remote. Continue?'), t('Undo anyway'), true))) return;
     let message = '';
-    const ok = await plugin.run('Undo last commit', async () => { message = await plugin.git.undoLastCommit(); return 'changes kept staged'; });
+    const ok = await plugin.run(t('Undo last commit'), async () => { message = await plugin.git.undoLastCommit(); return t('changes kept staged'); });
     if (ok) { this.message = message; this.render(); }
   }
 
@@ -221,7 +222,7 @@ export class DiffView extends ItemView {
   private state: DiffState = { path: '', staged: false, untracked: false };
   constructor(leaf: WorkspaceLeaf, private plugin: GitPlugin) { super(leaf); }
   getViewType(): string { return DIFF_VIEW; }
-  getDisplayText(): string { return `${this.state.path.split('/').pop() ?? ''} (${this.state.staged ? 'staged' : 'working tree'})`; }
+  getDisplayText(): string { return `${this.state.path.split('/').pop() ?? ''} (${t(this.state.staged ? 'staged' : 'working tree')})`; }
   getIcon(): string { return 'diff'; }
   getState(): Record<string, unknown> { return { ...this.state }; }
   async setState(state: DiffState, result: ViewStateResult): Promise<void> {
@@ -240,15 +241,15 @@ export class DiffView extends ItemView {
     el.addClass('git-diff');
     const toolbar = el.createDiv({ cls: 'git-diff-toolbar' });
     toolbar.createSpan({ text: path, cls: 'git-diff-path' });
-    const open = toolbar.createEl('button', { text: 'Open file' });
+    const open = toolbar.createEl('button', { text: t('Open file') });
     open.onclick = () => void this.plugin.openFile(path);
-    const act = toolbar.createEl('button', { text: staged ? 'Unstage' : 'Stage', cls: 'mod-cta' });
+    const act = toolbar.createEl('button', { text: t(staged ? 'Unstage' : 'Stage'), cls: 'mod-cta' });
     act.onclick = () => void this.plugin.run(staged ? 'Unstage' : 'Stage', () => staged ? this.plugin.git.unstage([path]) : this.plugin.git.add([path]), true)
       .then(() => { this.state.staged = !staged; void this.render(); });
     let diff = '';
     try { diff = untracked && !staged ? await this.plugin.git.diffUntracked(path) : await this.plugin.git.diff(path, staged); }
     catch (e) { el.createDiv({ cls: 'git-empty', text: (e as Error).message }); return; }
-    if (!diff.trim()) { el.createDiv({ cls: 'git-empty', text: 'No differences' }); return; }
+    if (!diff.trim()) { el.createDiv({ cls: 'git-empty', text: t('No differences') }); return; }
     const pre = el.createDiv({ cls: 'git-diff-body' });
     for (const line of diff.replace(/\n$/, '').split('\n')) {
       const cls = line.startsWith('+++') || line.startsWith('---') ? 'meta' : line.startsWith('@@') ? 'hunk'

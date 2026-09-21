@@ -95,3 +95,6 @@
 .git-graph-details-head { color: var(--text-muted); margin-bottom: var(--size-2-2); }
 .git-graph-message { white-space: pre-wrap; margin-bottom: var(--size-4-2); }
 .git-graph > button { margin: var(--size-4-2); }
+
+.git-ssh-key { width: 100%; font-family: var(--font-monospace); font-size: var(--font-smaller); word-break: break-all; resize: vertical; }
+.git-graph-checkout { margin-bottom: var(--size-4-2); }
