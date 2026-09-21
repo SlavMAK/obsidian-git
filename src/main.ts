@@ -16,22 +16,10 @@ interface Settings {
 const DEFAULTS: Settings = { gitPath: '', extraPath: '', authorName: '', authorEmail: '' };
 
 export const REFRESH_EVENT = 'git-scm:refresh';
-const GITIGNORE = `# Obsidian: window layout changes on every click and conflicts between devices
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
+const GITIGNORE = `# Obsidian app data: settings, layout, plugins, themes, caches.
+# Per-device state that conflicts between machines — the vault syncs content only.
+.obsidian/
 .trash/
-
-# Plugins: dependencies, build output, per-device state (often holds tokens), logs, caches
-.obsidian/plugins/*/node_modules/
-.obsidian/plugins/*/main.js
-.obsidian/plugins/*/main.js.map
-.obsidian/plugins/*/data.json
-.obsidian/plugins/*/storage/
-.obsidian/plugins/*/*.log
-.obsidian/plugins/*/.cache/
-.obsidian/plugins/*/cache/
-.obsidian/plugins/*/*.cache
-.obsidian/plugins/*/.tmp/
 
 # OS / editor noise
 .DS_Store
@@ -200,7 +188,7 @@ export default class GitPlugin extends Plugin {
     const ok = await this.run('Initialize repository', () => this.git.init());
     if (!ok) return;
     const ignore = path.join(this.vaultPath, '.gitignore');
-    if (!fs.existsSync(ignore) && await confirm(this.app, 'Create .gitignore', 'Ignore Obsidian workspace files (.obsidian/workspace.json, .trash) that change constantly?', 'Create')) {
+    if (!fs.existsSync(ignore) && await confirm(this.app, 'Create .gitignore', 'Ignore Obsidian app data (.obsidian/, .trash) and track note content only?', 'Create')) {
       fs.writeFileSync(ignore, GITIGNORE);
     }
     await this.refresh();
