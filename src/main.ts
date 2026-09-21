@@ -21,6 +21,9 @@ const GITIGNORE = `# Obsidian app data: settings, layout, plugins, themes, cache
 .obsidian/
 .trash/
 
+# API client environments: often hold tokens and per-machine URLs
+environments/
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
