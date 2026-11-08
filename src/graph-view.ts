@@ -55,7 +55,12 @@ export class GraphView extends ItemView {
       row.createSpan({ text: relativeDate(c.date), cls: 'git-graph-date', attr: { 'aria-label': c.date.toLocaleString() } });
       row.createSpan({ text: c.hash.slice(0, 7), cls: 'git-graph-hash' });
       row.onclick = () => { this.expanded = this.expanded === c.hash ? null : c.hash; this.render(); };
-      if (this.expanded === c.hash) void this.details(table.createDiv({ cls: 'git-graph-details' }), c);
+      if (this.expanded === c.hash) {
+        // Keep the lanes running past the expanded details so the graph doesn't break there.
+        const wrap = table.createDiv({ cls: 'git-graph-details-row' });
+        wrap.appendChild(this.spacer(rows[i], width));
+        void this.details(wrap.createDiv({ cls: 'git-graph-details' }), c);
+      }
     });
     if (this.commits.length >= this.limit) {
       const more = el.createEl('button', { text: t('Load more') });
@@ -93,6 +98,21 @@ export class GraphView extends ItemView {
     await plugin.run(t('Checkout'), () => plugin.git.checkoutRef(branch ?? c.hash));
   }
 
+  /** Vertical lines for every lane alive below row `r`, stretched to the details' height. */
+  private spacer(r: Row, width: number): SVGElement {
+    const s = document.createElementNS(SVG, 'svg');
+    s.setAttribute('width', String(width));
+    s.classList.add('git-graph-svg', 'git-graph-spacer');
+    for (const lane of new Set([...r.through, ...r.edges.map(e => e.to)])) {
+      const l = document.createElementNS(SVG, 'line');
+      const x = String(lane * W + W / 2);
+      l.setAttribute('x1', x); l.setAttribute('x2', x); l.setAttribute('y1', '0'); l.setAttribute('y2', '100%');
+      l.setAttribute('stroke', COLORS[lane % COLORS.length]); l.setAttribute('stroke-width', '2');
+      s.appendChild(l);
+    }
+    return s;
+  }
+
   private svg(r: Row, width: number): SVGElement {
     const s = document.createElementNS(SVG, 'svg');
     s.setAttribute('width', String(width));
@@ -105,6 +125,7 @@ export class GraphView extends ItemView {
       p.setAttribute('d', d); p.setAttribute('stroke', color(lane)); p.setAttribute('fill', 'none'); p.setAttribute('stroke-width', '2');
       s.appendChild(p);
     };
+    if (r.incoming) path(`M${x(r.lane)},0 V${H / 2}`, r.lane);
     for (const t of r.through) path(`M${x(t)},0 V${H}`, t);
     for (const j of r.joins) path(`M${x(j)},0 C${x(j)},${H / 2} ${x(r.lane)},0 ${x(r.lane)},${H / 2}`, j);
     for (const e of r.edges) {

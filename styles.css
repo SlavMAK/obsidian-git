@@ -54,26 +54,28 @@
 .git-diff, .git-conflict { padding: 0; }
 .git-diff-toolbar { display: flex; align-items: center; gap: var(--size-2-2); padding: var(--size-2-2) var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); position: sticky; top: 0; background: var(--background-primary); z-index: 1; }
 .git-diff-path { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.git-diff-body, .git-conflict-body { font-family: var(--font-monospace); font-size: var(--font-smaller); padding: var(--size-4-2) 0; }
-.git-diff-line, .git-conflict-line { white-space: pre-wrap; word-break: break-all; padding: 0 var(--size-4-2); line-height: 1.5; }
+.git-diff-body { font-family: var(--font-monospace); font-size: var(--font-smaller); padding: var(--size-4-2) 0; }
+.git-diff-line { white-space: pre-wrap; word-break: break-all; padding: 0 var(--size-4-2); line-height: 1.5; }
 .git-diff-add { background: rgba(var(--color-green-rgb), .15); }
 .git-diff-del { background: rgba(var(--color-red-rgb), .15); }
 .git-diff-hunk { color: var(--color-cyan); background: var(--background-secondary); margin-top: var(--size-2-2); }
 .git-diff-meta { color: var(--text-faint); }
 
-/* ---- conflicts (VS Code merge colors: current teal, incoming blue) ---- */
-.git-conflict-block { margin: var(--size-2-1) 0; }
-.git-conflict-head { display: flex; align-items: center; gap: var(--size-4-2); padding: 0 var(--size-4-2); line-height: 1.6; font-weight: 600; }
-.git-conflict-current-head { background: rgba(64, 200, 174, .5); }
-.git-conflict-current { background: rgba(64, 200, 174, .2); }
-.git-conflict-incoming-head { background: rgba(64, 166, 255, .5); }
-.git-conflict-incoming { background: rgba(64, 166, 255, .2); }
-.git-conflict-base-head { background: rgba(96, 96, 96, .5); }
-.git-conflict-base { background: rgba(96, 96, 96, .2); }
-.git-conflict-sep { padding: 0 var(--size-4-2); color: var(--text-muted); }
-.git-conflict-actions { display: flex; gap: var(--size-4-2); font-weight: 400; font-family: var(--font-interface); font-size: var(--font-ui-smaller); }
-.git-conflict-action { color: var(--text-accent); cursor: pointer; }
-.git-conflict-action:hover { text-decoration: underline; }
+/* ---- conflicts: one column = resulting file (VS Code colors: mine teal, incoming blue) ---- */
+.git-conflict-body { position: relative; padding: var(--size-4-2) var(--size-4-4); max-width: var(--file-line-width); margin: 0 auto; }
+/* rendered off-screen (but laid out, so mermaid/math can measure) before being swapped in */
+.git-conflict-same.is-pending { position: absolute; left: 0; right: 0; top: 0; padding: inherit; visibility: hidden; pointer-events: none; }
+.git-conflict-slot { margin: var(--size-4-2) 0; display: flex; flex-direction: column; gap: var(--size-2-3); }
+.git-conflict-piece { padding: var(--size-2-2) var(--size-4-3); border-radius: var(--radius-s); transition: opacity .15s; }
+.git-conflict-current { background: rgba(64, 200, 174, .15); border-left: 3px solid rgba(64, 200, 174, .9); }
+.git-conflict-incoming { background: rgba(64, 166, 255, .15); border-left: 3px solid rgba(64, 166, 255, .9); }
+.git-conflict-piece.is-off { opacity: .4; }
+.git-conflict-piece.is-off:hover { opacity: .65; }
+.git-conflict-piece-label { font-size: var(--font-ui-smaller); font-weight: 600; margin-right: auto; }
+.git-conflict-actions { display: flex; align-items: center; gap: var(--size-2-2); flex-wrap: wrap; }
+.git-conflict-actions .clickable-icon.is-disabled { opacity: .3; pointer-events: none; }
+.git-conflict-apply { justify-content: flex-end; }
+.git-conflict-empty { color: var(--text-faint); font-style: italic; padding: var(--size-2-2) 0; }
 
 /* ---- graph ---- */
 .git-graph { padding: 0; }
@@ -91,7 +93,9 @@
 .git-graph-author { color: var(--text-muted); max-width: 12em; overflow: hidden; text-overflow: ellipsis; }
 .git-graph-date { color: var(--text-faint); width: 6em; text-align: right; }
 .git-graph-hash { font-family: var(--font-monospace); color: var(--text-faint); }
-.git-graph-details { margin: 0 var(--size-4-2) var(--size-4-2) 40px; padding: var(--size-4-2); background: var(--background-secondary); border-radius: var(--radius-m); font-size: var(--font-ui-small); }
+.git-graph-details-row { display: flex; gap: var(--size-4-2); padding: 0 var(--size-4-2); }
+.git-graph-spacer { align-self: stretch; height: auto; }
+.git-graph-details { flex: 1; min-width: 0; margin: 0 0 var(--size-4-2); padding: var(--size-4-2); background: var(--background-secondary); border-radius: var(--radius-m); font-size: var(--font-ui-small); }
 .git-graph-details-head { color: var(--text-muted); margin-bottom: var(--size-2-2); }
 .git-graph-message { white-space: pre-wrap; margin-bottom: var(--size-4-2); }
 .git-graph > button { margin: var(--size-4-2); }

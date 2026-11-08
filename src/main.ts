@@ -1,6 +1,7 @@
 import { App, FileSystemAdapter, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, debounce } from 'obsidian';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { AUTH_ERROR, Git, GitError, type Status } from './git';
 import { fixAuth } from './auth';
 import { BranchModal, RemotesModal, confirm, prompt } from './ui';
@@ -18,6 +19,9 @@ interface Settings {
 const DEFAULTS: Settings = { gitPath: '', extraPath: '', authorName: '', authorEmail: '' };
 
 export const REFRESH_EVENT = 'git-scm:refresh';
+// Shared by every loaded copy of the plugin (a dev reload can leave a stale one alive): two
+// syncs at once race on push ("cannot lock ref"), so only one may run per window.
+const lock = globalThis as unknown as { gitScmSyncing?: boolean };
 const GITIGNORE = `# Obsidian app data: settings, layout, plugins, themes, caches.
 # Per-device state that conflicts between machines — the vault syncs content only.
 .obsidian/
@@ -62,6 +66,7 @@ export default class GitPlugin extends Plugin {
     cmd('open-graph', t('Open commit graph'), () => this.openView(GRAPH_VIEW, 'tab'));
     cmd('init', t('Initialize repository'), () => this.initRepo());
     cmd('commit', t('Commit staged changes'), () => this.openView(SCM_VIEW, 'left'));
+    cmd('sync', t('Sync'), () => this.sync());
     cmd('push', t('Push'), () => this.push());
     cmd('pull', t('Pull'), () => this.run(t('Pull'), () => this.git.pull()));
     cmd('fetch', t('Fetch'), () => this.run(t('Fetch'), () => this.git.fetch()));
@@ -80,6 +85,7 @@ export default class GitPlugin extends Plugin {
     this.registerEvent(this.app.vault.on('rename', onChange));
     // .git itself is outside the vault's watcher (external pushes, CLI commits), so poll lightly too.
     this.registerInterval(window.setInterval(() => void this.refresh(), 30_000));
+    this.registerInterval(window.setInterval(() => void this.autoPull(), 60_000));
 
     this.app.workspace.onLayoutReady(() => {
       void this.refresh().then(() => { if (!this.isRepo) void this.offerInit(); });
@@ -146,6 +152,35 @@ export default class GitPlugin extends Plugin {
     }
   }
 
+  private autoPulling = false;
+  private autoPullError = '';
+
+  /** Background fetch; fast-forward if the remote moved. Never merges or prompts — failures notify once. */
+  async autoPull(): Promise<void> {
+    const st = this.status;
+    if (this.autoPulling || lock.gitScmSyncing || !st?.upstream || st.merging) return;
+    this.autoPulling = true;
+    try {
+      await this.git.run(['fetch', '--prune']);
+      await this.refresh();
+      const behind = this.status?.behind ?? 0;
+      if (!behind) return;
+      await this.git.run(['pull', '--ff-only']);
+      this.autoPullError = '';
+      new Notice(t('Pulled {n} commit(s) from {upstream}', { n: behind, upstream: st.upstream }));
+    } catch (e) {
+      const msg = e instanceof GitError ? e.message : String(e);
+      console.error('git auto-pull', e);
+      // ponytail: dedupe by message only; a minute-by-minute retry stays silent until the error changes.
+      const overlap = /would be overwritten|not possible to fast-forward|diverg/i.test(msg);
+      if (msg !== this.autoPullError) new Notice(overlap ? t('New changes on the server touch files you are editing. Press Sync to combine them.') : t('Auto-pull failed:\n{msg}', { msg }), 10_000);
+      this.autoPullError = msg;
+    } finally {
+      this.autoPulling = false;
+      await this.refresh(true);
+    }
+  }
+
   manageRemotes(): void {
     if (this.isRepo) new RemotesModal(this.app, this).open(); else new Notice(t('Not a git repository'));
   }
@@ -160,6 +195,70 @@ export default class GitPlugin extends Plugin {
     }
     if (!st.upstream && st.branch && !(await confirm(this.app, t('Publish branch'), t("The branch '{branch}' has no remote branch. Publish it?", { branch: st.branch }), t('Publish')))) return;
     await this.run(t('Push'), () => this.git.push(st));
+  }
+
+  /**
+   * One-button sync for people who don't know git: save (commit) everything, merge what others
+   * pushed, push. Overlapping edits open the conflict view; resolving the last one calls sync again.
+   * Returns true when local changes were committed (the caller clears its message box).
+   */
+  get syncing(): boolean { return !!lock.gitScmSyncing; }
+
+  async sync(message = ''): Promise<boolean> {
+    if (lock.gitScmSyncing) return false; // double click / another copy already syncing
+    lock.gitScmSyncing = true;
+    this.app.workspace.trigger(REFRESH_EVENT); // show "Syncing…"
+    try { return await this.doSync(message); } finally {
+      lock.gitScmSyncing = false;
+      this.app.workspace.trigger(REFRESH_EVENT);
+    }
+  }
+
+  private async doSync(message: string): Promise<boolean> {
+    await this.refresh();
+    const st = this.status;
+    if (!st) return false;
+    if (!(await this.git.remotes()).length) {
+      new Notice(t('No remote configured. Add one first.'));
+      this.manageRemotes();
+      return false;
+    }
+    if (await this.openConflicts()) return false;
+    let committed = false, conflicted = false;
+    const ok = await this.run(t('Sync'), async () => {
+      if (st.merging) await this.git.run(['commit', '--no-edit']); // all conflicts resolved: finish the merge
+      else if (st.entries.length) {
+        await this.git.addAll();
+        await this.git.commit(message || await this.autoMessage());
+        committed = true;
+      }
+      if (st.upstream) {
+        // Merge, never rebase: conflict sides stay "mine" (HEAD) vs "theirs". --ff beats pull.ff=only.
+        try { await this.git.run(['pull', '--no-rebase', '--ff', '--no-edit']); } catch (e) {
+          if ((await this.git.status()).entries.some(x => x.conflict)) { conflicted = true; return; }
+          throw e;
+        }
+      }
+      await this.git.push(await this.git.status());
+    }, true);
+    if (conflicted) await this.openConflicts();
+    else if (ok) new Notice(t('Synced'));
+    return committed;
+  }
+
+  /** Open the resolver on the first conflicted file; true if there was one. */
+  private async openConflicts(): Promise<boolean> {
+    await this.refresh();
+    const conflicts = this.status?.entries.filter(e => e.conflict) ?? [];
+    if (!conflicts.length) return false;
+    new Notice(t('Someone else changed the same places. Choose which version to keep ({n} file(s)).', { n: conflicts.length }), 10_000);
+    await this.openView(CONFLICT_VIEW, 'tab', { path: conflicts[0].path });
+    return true;
+  }
+
+  private async autoMessage(): Promise<string> {
+    const name = this.settings.authorName || await this.git.config('user.name') || os.userInfo().username;
+    return t('Changes by {name}, {date}', { name, date: new Date().toLocaleString() });
   }
 
   async switchBranch(): Promise<void> {

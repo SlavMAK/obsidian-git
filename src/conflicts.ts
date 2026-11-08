@@ -46,12 +46,13 @@ export function parseConflicts(text: string): Block[] {
   return blocks;
 }
 
-export type Resolution = 'current' | 'incoming' | 'both';
+export type Side = 'current' | 'incoming';
+/** A preset, or the sides to keep in the order they should appear ([] drops both). */
+export type Resolution = Side | 'both' | Side[];
 
 export function resolve(block: ConflictBlock, how: Resolution): string[] {
-  if (how === 'current') return block.current;
-  if (how === 'incoming') return block.incoming;
-  return [...block.current, ...block.incoming];
+  const order: Side[] = Array.isArray(how) ? how : how === 'both' ? ['current', 'incoming'] : [how];
+  return order.flatMap(side => block[side]);
 }
 
 export function serialize(blocks: Block[]): string {

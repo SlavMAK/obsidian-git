@@ -39,6 +39,8 @@ test('conflict parser: parse / resolve / serialize', () => {
   assert.equal(conflicts.serialize(blocks), text);
   assert.equal(conflicts.applyResolution(text, 0, 'both'), 'a\nours\ntheirs\nz');
   assert.equal(conflicts.applyResolution(text, 0, 'incoming'), 'a\ntheirs\nz');
+  assert.equal(conflicts.applyResolution(text, 0, ['incoming', 'current']), 'a\ntheirs\nours\nz');
+  assert.equal(conflicts.applyResolution(text, 0, []), 'a\nz');
   // diff3 base section and an unterminated marker treated as text
   const d3 = ['<<<<<<< HEAD', 'o', '||||||| base', 'b', '=======', 't', '>>>>>>> x', '<<<<<<< stray'].join('\n');
   const b3 = conflicts.parseConflicts(d3);
@@ -61,6 +63,8 @@ test('lanes: merge and fork get separate lanes, joins collapse', () => {
   assert.deepEqual(rows[3].joins, [1]);      // C's lane joins A
   assert.equal(rows[3].width, 2);
   assert.deepEqual(rows[3].edges, []);
+  // only the tip has nothing above it; every other dot is entered from its lane
+  assert.deepEqual(rows.map(r => r.incoming), [false, true, true, true]);
 });
 
 test('git wrapper against a temp repo', async () => {

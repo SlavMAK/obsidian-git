@@ -74,19 +74,34 @@ export class ScmView extends ItemView {
     const changes = st.entries.filter(e => !e.staged && !e.conflict);
     const conflicts = st.entries.filter(e => e.conflict);
     const box = root.createDiv({ cls: 'git-commit-box' });
-    const ta = box.createEl('textarea', { cls: 'git-message', attr: { rows: '3', placeholder: t("Message (Ctrl+Enter to commit on '{branch}')", { branch: st.branch ?? 'HEAD' }) } });
+    // Single-branch teams: with a remote branch the main button is "Sync" (commit all + pull + push).
+    const syncMode = !!st.upstream;
+    const ta = box.createEl('textarea', { cls: 'git-message', attr: { rows: '3', placeholder: syncMode
+      ? t('Describe your changes (optional, Ctrl+Enter to sync)')
+      : t("Message (Ctrl+Enter to commit on '{branch}')", { branch: st.branch ?? 'HEAD' }) } });
     ta.value = this.message;
     if (caret >= 0) { ta.focus(); ta.setSelectionRange(caret, caret); }
     ta.oninput = () => { this.message = ta.value; };
-    ta.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void this.commit(); } };
+    ta.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commitBtn.click(); } };
     const row = box.createDiv({ cls: 'git-commit-row' });
     const commitBtn = row.createEl('button', { text: t('Commit'), cls: 'mod-cta git-commit-btn' });
     commitBtn.onclick = () => void this.commit();
-    if (st.merging) commitBtn.setText(t('Commit merge'));
+    if (syncMode) {
+      const ab = `${st.ahead ? ` ↑${st.ahead}` : ''}${st.behind ? ` ↓${st.behind}` : ''}`;
+      commitBtn.setText(plugin.syncing ? t('Syncing…') : t('Sync') + ab);
+      commitBtn.disabled = plugin.syncing;
+      commitBtn.onclick = () => void this.sync();
+    } else if (st.merging) commitBtn.setText(t('Commit merge'));
+    // Nothing to commit and the branch is not on the remote yet -> the main button publishes it.
+    else if (!st.entries.length && st.head !== '(initial)' && st.branch) {
+      commitBtn.setText(t('Publish branch'));
+      commitBtn.onclick = () => void plugin.push();
+    }
     const more = row.createEl('button', { cls: 'git-commit-more', attr: { 'aria-label': t('More commit actions') } });
     setIcon(more, 'chevron-down');
     more.onclick = ev => {
       const menu = new Menu();
+      menu.addItem(i => i.setTitle(t('Commit staged')).setIcon('check').onClick(() => void this.commit()));
       menu.addItem(i => i.setTitle(t('Commit (amend)')).setIcon('pencil').onClick(() => void this.commit({ amend: true })));
       menu.addItem(i => i.setTitle(t('Commit & push')).setIcon('upload').onClick(() => void this.commit({ push: true })));
       menu.addItem(i => i.setTitle(t('Stage all & commit')).setIcon('plus-circle').onClick(() => void this.commit({ all: true })));
@@ -196,6 +211,10 @@ export class ScmView extends ItemView {
     if (!ok) return;
     this.message = '';
     if (opts.push) await plugin.push(); else this.render();
+  }
+
+  private async sync(): Promise<void> {
+    if (await this.plugin.sync(this.message.trim())) { this.message = ''; this.render(); }
   }
 
   async undoLastCommit(): Promise<void> {

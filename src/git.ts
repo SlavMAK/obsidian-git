@@ -103,7 +103,9 @@ export class Git {
       return stdout;
     } catch (e: unknown) {
       const err = e as { stderr?: string; stdout?: string; message: string; code?: number | string };
-      throw new GitError((err.stderr || err.stdout || err.message).trim(), args, err.code, err.stdout ?? '');
+      // Drop ssh's "** WARNING: ... post-quantum ..." banner: it is noise, not the error.
+      const msg = (err.stderr || err.stdout || err.message).split('\n').filter(l => !l.startsWith('** ')).join('\n').trim();
+      throw new GitError(msg, args, err.code, err.stdout ?? '');
     }
   }
 

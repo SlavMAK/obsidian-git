@@ -6,6 +6,7 @@
  */
 export interface Row {
   lane: number;                        // column of the dot
+  incoming: boolean;                   // a child above continues into the dot along its lane
   through: number[];                   // lanes drawn straight through this row
   joins: number[];                     // lanes from above curving into the dot
   edges: { to: number; merge: boolean }[]; // dot -> lane in the next row
@@ -18,7 +19,8 @@ export function layout(commits: { hash: string; parents: string[] }[]): Row[] {
   const free = () => { const i = lanes.indexOf(null); return i === -1 ? lanes.push(null) - 1 : i; };
   for (const c of commits) {
     let lane = lanes.indexOf(c.hash);
-    if (lane === -1) { lane = free(); lanes[lane] = c.hash; }
+    const incoming = lane !== -1; // false for branch tips: nothing above them
+    if (!incoming) { lane = free(); lanes[lane] = c.hash; }
     const joins: number[] = [];
     lanes.forEach((h, i) => { if (h === c.hash && i !== lane) { joins.push(i); lanes[i] = null; } });
     const through = lanes.map((h, i) => (h && i !== lane ? i : -1)).filter(i => i >= 0);
@@ -32,7 +34,7 @@ export function layout(commits: { hash: string; parents: string[] }[]): Row[] {
     }
     while (lanes.length && lanes[lanes.length - 1] === null) lanes.pop();
     const width = Math.max(lane, ...through, ...joins, ...edges.map(e => e.to)) + 1;
-    rows.push({ lane, through, joins, edges, width });
+    rows.push({ lane, incoming, through, joins, edges, width });
   }
   return rows;
 }
